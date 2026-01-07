@@ -1,16 +1,42 @@
-# React + Vite
+# Geofencing App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Prerequisites
+- Node.js
+- Docker (for PostgreSQL)
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. **Database**:
+   Start PostgreSQL using Docker:
+   ```bash
+   cd backend
+   docker-compose up -d
+   ```
 
-## React Compiler
+2. **Backend**:
+   Install dependencies and start the server:
+   ```bash
+   cd backend
+   npm install
+   npm run start:dev
+   ```
+   The API will be available at `http://localhost:3000`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+3. **Frontend**:
+   Install dependencies and start the development server:
+   ```bash
+   # From root directory
+   npm install
+   npm run dev
+   ```
+   The app will be available at `http://localhost:5173`.
 
-## Expanding the ESLint configuration
+## Features implemented
+- **Multi-tenant Architecture**: Organizations, Users, Geofences.
+- **Authentication**: Email/Password login, automatic Organization creation/joining based on email domain.
+- **Dashboard**: Interactive map for geofencing (Leaflet).
+- **Role-based Access**: Basic structure for Super User / Org Admin / End User.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Notes
+- The app uses a local PostgreSQL database. Ensure the container is running.
+- Backend defaults to logical implementation of requirements.
