@@ -10,6 +10,8 @@ import ManageRoutes from './pages/ManageRoutes';
 import ManageGeofences from './pages/ManageGeofences';
 import ManageAssignments from './pages/ManageAssignments';
 import MyAssignments from './pages/MyAssignments';
+import Notifications from './pages/Notifications';
+import LandingPage from './pages/LandingPage';
 import './index.css';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -92,13 +94,19 @@ function App() {
             </ProtectedRoute>
           } />
 
+          <Route path="/notifications" element={
+            <ProtectedRoute allowedRoles={['ORG_ADMIN', 'END_USER']}>
+              <Notifications />
+            </ProtectedRoute>
+          } />
+
           <Route path="/admin" element={
             <ProtectedRoute allowedRoles={['SUPER_USER']}>
               <AdminDashboard />
             </ProtectedRoute>
           } />
 
-          <Route path="/" element={<RootRedirect />} />
+          <Route path="/" element={<LandingPage />} />
         </Routes>
       </Router>
     </AuthProvider>

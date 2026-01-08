@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { geofencesApi } from '../services/orgApi';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, MapPin, Search } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2, MapPin, Search, Navigation, Layers } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap, CircleMarker, Popup } from 'react-leaflet';
 import { searchAddress } from '../utils/geoUtils';
+import DashboardLayout from '../components/DashboardLayout';
 import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix for default Leaflet markers in Vite/Webpack
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 // Component to fly to searched location
 const FlyToLocation = ({ location }) => {
@@ -30,7 +40,7 @@ const LocationPicker = ({ onSelect, selectedLocation }) => {
             <Circle
                 center={[selectedLocation.lat, selectedLocation.lng]}
                 radius={100}
-                pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.2 }}
+                pathOptions={{ color: '#fbbf24', fillColor: '#fbbf24', fillOpacity: 0.2, dashArray: '5,5' }}
             />
         </>
     ) : null;
@@ -46,10 +56,11 @@ const ManageGeofences = () => {
     const [selectedLocation, setSelectedLocation] = useState(null);
 
     // Search state
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState([]);
-    const [isSearching, setIsSearching] = useState(false);
-    const [showSearchResults, setShowSearchResults] = useState(false);
+    const [globalSearch, setGlobalSearch] = useState('');
+    const [mapSearchQuery, setMapSearchQuery] = useState('');
+    const [mapSearchResults, setMapSearchResults] = useState([]);
+    const [isMapSearching, setIsMapSearching] = useState(false);
+    const [showMapSearchResults, setShowMapSearchResults] = useState(false);
     const [flyToTarget, setFlyToTarget] = useState(null);
 
     useEffect(() => {
@@ -81,52 +92,41 @@ const ManageGeofences = () => {
         }));
     };
 
-    const handleSearch = async (e) => {
-        e.preventDefault();
-        if (!searchQuery.trim()) return;
+    const handleMapSearch = async (e) => {
+        e?.preventDefault();
+        if (!mapSearchQuery.trim()) return;
 
-        setIsSearching(true);
-        const results = await searchAddress(searchQuery);
-        setSearchResults(results);
-        setIsSearching(false);
-        setShowSearchResults(true);
+        setIsMapSearching(true);
+        const results = await searchAddress(mapSearchQuery);
+        setMapSearchResults(results);
+        setIsMapSearching(false);
+        setShowMapSearchResults(true);
     };
 
-    const handleSearchSelect = (result) => {
+    const handleMapSearchSelect = (result) => {
         const location = {
             lat: parseFloat(result.lat),
             lng: parseFloat(result.lon)
         };
-        setSelectedLocation(location);
-        setFormData(prev => ({
-            ...prev,
-            latitude: location.lat,
-            longitude: location.lng,
-            name: prev.name || result.display_name.split(',')[0] // Auto-fill name with first part
-        }));
         setFlyToTarget(location);
-        setShowSearchResults(false);
-        setSearchQuery('');
+        setShowMapSearchResults(false);
+        setMapSearchQuery(result.display_name.split(',')[0]);
     };
 
     const handleCreate = async (e) => {
         e.preventDefault();
         if (!formData.latitude || !formData.longitude) {
-            alert('Please select a location on the map or search for an address');
+            alert('Please select a location on the map');
             return;
         }
         try {
             await geofencesApi.create({
-                name: formData.name,
-                latitude: formData.latitude,
-                longitude: formData.longitude,
-                radius: formData.radius,
+                ...formData,
                 organizationId: user.organization.id
             });
             setShowForm(false);
             setFormData({ name: '', latitude: null, longitude: null, radius: 100 });
             setSelectedLocation(null);
-            setFlyToTarget(null);
             fetchGeofences();
         } catch (error) {
             alert('Failed to create geofence');
@@ -134,211 +134,185 @@ const ManageGeofences = () => {
     };
 
     const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this geofence?')) return;
+        if (!confirm('Are you sure?')) return;
         try {
             await geofencesApi.delete(id);
             fetchGeofences();
         } catch (error) {
-            alert('Failed to delete geofence');
+            alert('Failed to delete');
         }
     };
 
+    const filteredGeofences = geofences.filter(gf =>
+        gf.name.toLowerCase().includes(globalSearch.toLowerCase())
+    );
+
     return (
-        <div style={{ height: '100vh', width: '100vw', background: '#1e1e2f', color: '#fff', padding: '20px', overflowY: 'auto' }}>
-            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-                <header style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
-                    <Link to="/dashboard" style={{ color: '#aaa' }}><ArrowLeft /></Link>
-                    <h1 style={{ margin: 0 }}>Manage Geofences</h1>
-                </header>
+        <DashboardLayout
+            title="Geofencing"
+            searchQuery={globalSearch}
+            onSearchChange={(e) => setGlobalSearch(e.target.value)}
+        >
+            <div className="side-panels" style={{ width: '380px' }}>
+                <section className="glass-panel" style={{ height: 'auto', maxHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <div className="panel-header" style={{ marginBottom: '16px' }}>
+                        <h3>{showForm ? 'New Geofence' : 'Geofence Zones'}</h3>
+                        <div className="toolbar-btn" onClick={() => setShowForm(!showForm)}>
+                            <Plus size={18} />
+                        </div>
+                    </div>
 
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    style={{
-                        background: '#3b82f6',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '12px 20px',
-                        color: 'white',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '20px',
-                        fontWeight: 600
-                    }}
-                >
-                    <Plus size={18} /> Add Geofence
-                </button>
+                    {showForm ? (
+                        <form onSubmit={handleCreate} className="panel-list" style={{ gap: '12px' }}>
+                            <input
+                                type="text"
+                                placeholder="Geofence Name"
+                                value={formData.name}
+                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                required
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px' }}
+                            />
 
-                {showForm && (
-                    <form onSubmit={handleCreate} style={{
-                        background: 'rgba(30,30,40,0.8)',
-                        padding: '20px',
-                        borderRadius: '12px',
-                        marginBottom: '20px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '15px'
-                    }}>
+                            <div style={{ color: '#71717a', fontSize: '0.8rem' }}>
+                                Radius: {formData.radius}m
+                                <input type="range" min="50" max="1000" step="50" value={formData.radius} onChange={(e) => setFormData({ ...formData, radius: Number(e.target.value) })} style={{ width: '100%', accentColor: '#fbbf24', marginTop: '8px' }} />
+                            </div>
+
+                            <div style={{ background: 'rgba(251, 191, 36, 0.05)', padding: '12px', borderRadius: '12px', fontSize: '0.8rem', color: '#fbbf24', border: '1px dashed rgba(251, 191, 36, 0.2)' }}>
+                                {selectedLocation ? `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}` : 'Click on map to select location'}
+                            </div>
+
+                            <button type="submit" className="action-button primary" style={{ background: '#fbbf24', color: '#000' }}>Create Geofence</button>
+                            <button type="button" onClick={() => setShowForm(false)} className="action-button" style={{ color: '#71717a' }}>Cancel</button>
+                        </form>
+                    ) : (
+                        <div className="panel-list" style={{ overflowY: 'auto' }}>
+                            {filteredGeofences.length > 0 ? filteredGeofences.map(gf => (
+                                <div
+                                    key={gf.id}
+                                    className="list-item"
+                                    onClick={() => setFlyToTarget({ lat: gf.latitude, lng: gf.longitude })}
+                                    style={{ padding: '16px' }}
+                                >
+                                    <div className="item-content">
+                                        <div className="item-title" style={{ fontWeight: 600 }}>{gf.name}</div>
+                                        <div className="item-subtitle">Radius: {gf.radius}m</div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <span className="badge badge-green" style={{ fontSize: '0.6rem' }}>Active</span>
+                                        <Trash2
+                                            size={16}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDelete(gf.id);
+                                            }}
+                                            style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.6 }}
+                                        />
+                                    </div>
+                                </div>
+                            )) : (
+                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#71717a', fontSize: '0.9rem' }}>
+                                    No geofences found
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </section>
+            </div>
+
+            <div className="map-canvas" style={{ position: 'relative' }}>
+                {/* Map Search Overlay */}
+                <div style={{
+                    position: 'absolute',
+                    top: '20px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 1000,
+                    width: '300px'
+                }}>
+                    <div className="search-bar-wrapper" style={{ background: 'rgba(15, 15, 20, 0.8)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)', width: '100%' }}>
+                        <Search size={18} className="search-icon" />
                         <input
                             type="text"
-                            placeholder="Geofence Name (e.g., Warehouse Zone A)"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            required
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
+                            placeholder="Find location..."
+                            value={mapSearchQuery}
+                            onChange={(e) => setMapSearchQuery(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleMapSearch()}
+                            style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', padding: '8px' }}
                         />
-
-                        {/* Address Search */}
-                        <div style={{ position: 'relative' }}>
-                            <label style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '8px', display: 'block' }}>
-                                Search for a location:
-                            </label>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <input
-                                    type="text"
-                                    placeholder="Search address, city, or landmark..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch(e)}
-                                    style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={handleSearch}
-                                    style={{ padding: '12px 16px', borderRadius: '8px', border: 'none', background: '#3b82f6', color: 'white', cursor: 'pointer' }}
+                    </div>
+                    {showMapSearchResults && mapSearchResults.length > 0 && (
+                        <div style={{
+                            background: 'rgba(15, 15, 20, 0.95)',
+                            borderRadius: '12px',
+                            marginTop: '8px',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            maxHeight: '200px',
+                            overflowY: 'auto'
+                        }}>
+                            {mapSearchResults.map(r => (
+                                <div
+                                    key={r.place_id}
+                                    onClick={() => handleMapSearchSelect(r)}
+                                    style={{ padding: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', fontSize: '0.8rem', color: '#ccc' }}
                                 >
-                                    {isSearching ? <span className="loader"></span> : <Search size={18} />}
-                                </button>
-                            </div>
-
-                            {showSearchResults && searchResults.length > 0 && (
-                                <ul style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    background: 'rgba(30,30,40,0.98)',
-                                    border: '1px solid #444',
-                                    borderRadius: '8px',
-                                    listStyle: 'none',
-                                    padding: 0,
-                                    margin: '8px 0 0 0',
-                                    maxHeight: '200px',
-                                    overflowY: 'auto',
-                                    zIndex: 100
-                                }}>
-                                    {searchResults.map((result) => (
-                                        <li
-                                            key={result.place_id}
-                                            onClick={() => handleSearchSelect(result)}
-                                            style={{
-                                                padding: '12px 15px',
-                                                cursor: 'pointer',
-                                                borderBottom: '1px solid #333',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '10px',
-                                                color: '#ccc'
-                                            }}
-                                            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(59,130,246,0.2)'}
-                                            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                        >
-                                            <MapPin size={14} style={{ color: '#3b82f6', flexShrink: 0 }} />
-                                            <span style={{ fontSize: '0.9em' }}>{result.display_name}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-
-                        <div>
-                            <label style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '8px', display: 'block' }}>
-                                Or click on the map to select location:
-                            </label>
-                            <div style={{ height: '300px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #444' }}>
-                                <MapContainer
-                                    center={[51.505, -0.09]}
-                                    zoom={13}
-                                    style={{ height: '100%', width: '100%' }}
-                                    scrollWheelZoom={true}
-                                >
-                                    <TileLayer
-                                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                    />
-                                    <LocationPicker onSelect={handleLocationSelect} selectedLocation={selectedLocation} />
-                                    <FlyToLocation location={flyToTarget} />
-                                </MapContainer>
-                            </div>
-                            {selectedLocation && (
-                                <div style={{ marginTop: '10px', color: '#4ade80', fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <MapPin size={14} />
-                                    Location selected: {selectedLocation.lat.toFixed(6)}, {selectedLocation.lng.toFixed(6)}
+                                    {r.display_name}
                                 </div>
-                            )}
+                            ))}
                         </div>
+                    )}
+                </div>
 
-                        <div>
-                            <label style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '8px', display: 'block' }}>
-                                Radius: {formData.radius} meters
-                            </label>
-                            <input
-                                type="range"
-                                min="50"
-                                max="1000"
-                                step="50"
-                                value={formData.radius}
-                                onChange={(e) => setFormData({ ...formData, radius: Number(e.target.value) })}
-                                style={{ width: '100%', accentColor: '#3b82f6' }}
+                <div className="map-toolbar">
+                    <div className="toolbar-btn"><Navigation size={18} /></div>
+                    <div className="toolbar-btn"><Layers size={18} /></div>
+                </div>
+
+                <MapContainer
+                    center={[19.076, 72.877]}
+                    zoom={12}
+                    style={{ height: '100%', width: '100%', borderRadius: '24px' }}
+                    zoomControl={false}
+                >
+                    <TileLayer
+                        attribution='Tiles &copy; Esri'
+                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    />
+                    <LocationPicker onSelect={handleLocationSelect} selectedLocation={selectedLocation} />
+                    <FlyToLocation location={flyToTarget} />
+
+                    {geofences.map(gf => (
+                        <React.Fragment key={gf.id}>
+                            <Circle
+                                center={[gf.latitude, gf.longitude]}
+                                radius={gf.radius}
+                                pathOptions={{
+                                    color: gf.id === flyToTarget?.id ? '#fbbf24' : '#10b981',
+                                    fillColor: gf.id === flyToTarget?.id ? '#fbbf24' : '#10b981',
+                                    fillOpacity: 0.15,
+                                    weight: 2
+                                }}
                             />
-                        </div>
+                            <CircleMarker
+                                center={[gf.latitude, gf.longitude]}
+                                radius={5}
+                                pathOptions={{ color: '#fff', fillColor: '#10b981', fillOpacity: 1, weight: 2 }}
+                            >
+                                <Popup>
+                                    <div style={{ color: '#000', fontWeight: 'bold' }}>{gf.name}</div>
+                                    <div style={{ color: '#666', fontSize: '0.8rem' }}>Radius: {gf.radius}m</div>
+                                </Popup>
+                            </CircleMarker>
+                        </React.Fragment>
+                    ))}
+                </MapContainer>
 
-                        <button type="submit" style={{ background: '#10b981', border: 'none', borderRadius: '8px', padding: '12px', color: 'white', cursor: 'pointer', fontWeight: 600 }}>
-                            Create Geofence
-                        </button>
-                    </form>
-                )}
-
-                {loading ? (
-                    <div style={{ textAlign: 'center', color: '#aaa', marginTop: '40px' }}>Loading geofences...</div>
-                ) : geofences.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#555', marginTop: '40px', background: 'rgba(255,255,255,0.05)', padding: '40px', borderRadius: '10px' }}>
-                        No geofences found. Create your first geofence above!
-                    </div>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {geofences.map(gf => (
-                            <div key={gf.id} style={{
-                                background: 'rgba(30,30,40,0.8)',
-                                border: '1px solid #444',
-                                padding: '15px 20px',
-                                borderRadius: '12px',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                            }}>
-                                <div>
-                                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <MapPin size={16} style={{ color: '#3b82f6' }} />
-                                        {gf.name}
-                                    </div>
-                                    <div style={{ color: '#aaa', fontSize: '0.85em', marginTop: '4px' }}>
-                                        {gf.latitude}, {gf.longitude} • Radius: {gf.radius}m
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => handleDelete(gf.id)}
-                                    style={{ background: '#ef4444', border: 'none', borderRadius: '8px', padding: '8px 12px', color: 'white', cursor: 'pointer' }}
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <div className="zoom-controls">
+                    <div className="toolbar-btn"><Navigation size={20} /></div>
+                    <div className="toolbar-btn"><Plus size={20} /></div>
+                </div>
             </div>
-        </div>
+        </DashboardLayout>
     );
 };
 

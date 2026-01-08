@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { routesApi, geofencesApi } from '../services/orgApi';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, MapPin } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2, MapPin, Navigation, Layers } from 'lucide-react';
+import DashboardLayout from '../components/DashboardLayout';
+import MapComponent from '../components/MapComponent';
 
 const ManageRoutes = () => {
     const { user } = useAuth();
@@ -12,6 +14,14 @@ const ManageRoutes = () => {
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [formData, setFormData] = useState({ name: '', geofenceIds: [], status: 'PLANNED' });
+
+    // Search state
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Map states
+    const [geofenceCenter, setGeofenceCenter] = useState(null);
+    const [selectedRouteId, setSelectedRouteId] = useState(null);
+    const [centerMapTrigger, setCenterMapTrigger] = useState(null);
 
     useEffect(() => {
         if (!user?.organization?.id) {
@@ -52,13 +62,15 @@ const ManageRoutes = () => {
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this route?')) return;
+    const handleDelete = async (e, id) => {
+        e.stopPropagation();
+        if (!confirm('Are you sure?')) return;
         try {
             await routesApi.delete(id);
+            if (selectedRouteId === id) setSelectedRouteId(null);
             fetchData();
         } catch (error) {
-            alert('Failed to delete route');
+            alert('Failed to delete');
         }
     };
 
@@ -71,139 +83,130 @@ const ManageRoutes = () => {
         }));
     };
 
+    const handleRouteClick = (route) => {
+        setSelectedRouteId(route.id);
+        if (route.geofences && route.geofences.length > 0) {
+            const firstGeo = route.geofences[0];
+            setGeofenceCenter({ lat: firstGeo.latitude, lng: firstGeo.longitude });
+        }
+    };
+
+    const getRouteGeofences = () => {
+        if (!selectedRouteId) return [];
+        const route = routes.find(r => r.id === selectedRouteId);
+        return route ? route.geofences || [] : [];
+    };
+
+    const filteredRoutes = routes.filter(r =>
+        r.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
     return (
-        <div style={{ height: '100vh', width: '100vw', background: '#1e1e2f', color: '#fff', padding: '20px', overflowY: 'auto' }}>
-            <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-                <header style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
-                    <Link to="/dashboard" style={{ color: '#aaa' }}><ArrowLeft /></Link>
-                    <h1 style={{ margin: 0 }}>Manage Routes</h1>
-                </header>
+        <DashboardLayout
+            title="Manage Routes"
+            searchQuery={searchQuery}
+            onSearchChange={(e) => setSearchQuery(e.target.value)}
+        >
+            <div className="side-panels" style={{ width: '400px' }}>
+                <section className="glass-panel" style={{ height: 'auto', maxHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <div className="panel-header" style={{ marginBottom: '16px' }}>
+                        <h3>{showForm ? 'New Route' : 'Operational Routes'}</h3>
+                        <div className="toolbar-btn" onClick={() => {
+                            setShowForm(!showForm);
+                            if (!showForm) setSelectedRouteId(null);
+                        }}>
+                            <Plus size={18} />
+                        </div>
+                    </div>
 
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    style={{
-                        background: '#3b82f6',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '12px 20px',
-                        color: 'white',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '20px',
-                        fontWeight: 600
-                    }}
-                >
-                    <Plus size={18} /> Add Route
-                </button>
+                    {showForm ? (
+                        <form onSubmit={handleCreate} className="panel-list">
+                            <input
+                                type="text"
+                                placeholder="Route Name"
+                                value={formData.name}
+                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                required
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', width: '100%' }}
+                            />
 
-                {showForm && (
-                    <form onSubmit={handleCreate} style={{
-                        background: 'rgba(30,30,40,0.8)',
-                        padding: '20px',
-                        borderRadius: '12px',
-                        marginBottom: '20px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '15px'
-                    }}>
-                        <input
-                            type="text"
-                            placeholder="Route Name"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            required
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                        />
+                            <div style={{ color: '#71717a', fontSize: '0.8rem', marginTop: '12px' }}>Select Geofences:</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                                {geofences.map(gf => (
+                                    <button
+                                        type="button"
+                                        key={gf.id}
+                                        onClick={() => toggleGeofence(gf.id)}
+                                        style={{
+                                            padding: '8px 14px',
+                                            borderRadius: '20px',
+                                            fontSize: '0.8rem',
+                                            border: formData.geofenceIds.includes(gf.id) ? '1px solid #818cf8' : '1px solid #333',
+                                            background: formData.geofenceIds.includes(gf.id) ? 'rgba(129, 140, 248, 0.2)' : 'transparent',
+                                            color: formData.geofenceIds.includes(gf.id) ? '#818cf8' : '#71717a',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s'
+                                        }}
+                                    >
+                                        {gf.name}
+                                    </button>
+                                ))}
+                            </div>
 
-                        <div>
-                            <label style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '8px', display: 'block' }}>Select Geofences:</label>
-                            {geofences.length === 0 ? (
-                                <div style={{ color: '#666' }}>No geofences available. Create geofences first.</div>
-                            ) : (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                    {geofences.map(gf => (
-                                        <button
-                                            type="button"
-                                            key={gf.id}
-                                            onClick={() => toggleGeofence(gf.id)}
-                                            style={{
-                                                padding: '8px 12px',
-                                                borderRadius: '20px',
-                                                border: formData.geofenceIds.includes(gf.id) ? '2px solid #3b82f6' : '1px solid #444',
-                                                background: formData.geofenceIds.includes(gf.id) ? 'rgba(59,130,246,0.2)' : 'transparent',
-                                                color: formData.geofenceIds.includes(gf.id) ? '#60a5fa' : '#aaa',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '5px'
-                                            }}
-                                        >
-                                            <MapPin size={14} /> {gf.name}
-                                        </button>
-                                    ))}
+                            <select
+                                value={formData.status}
+                                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', width: '100%', marginTop: '16px' }}
+                            >
+                                <option value="PLANNED">Planned</option>
+                                <option value="ACTIVE">Active</option>
+                                <option value="COMPLETED">Completed</option>
+                            </select>
+
+                            <button type="submit" className="action-button primary" style={{ marginTop: '20px' }}>Create Route</button>
+                            <button type="button" onClick={() => setShowForm(false)} className="action-button" style={{ marginTop: '8px' }}>Cancel</button>
+                        </form>
+                    ) : (
+                        <div className="panel-list" style={{ overflowY: 'auto' }}>
+                            {filteredRoutes.length > 0 ? filteredRoutes.map(route => (
+                                <div
+                                    key={route.id}
+                                    className={`list-item ${selectedRouteId === route.id ? 'selected' : ''}`}
+                                    onClick={() => handleRouteClick(route)}
+                                    style={{ border: selectedRouteId === route.id ? '1px solid rgba(129, 140, 248, 0.4)' : '1px solid transparent', padding: '16px' }}
+                                >
+                                    <div className="item-content">
+                                        <div className="item-title" style={{ fontWeight: 600 }}>{route.name}</div>
+                                        <div className="item-subtitle">{route.geofences?.length || 0} geofences • {route.status}</div>
+                                    </div>
+                                    <Trash2 size={16} onClick={(e) => handleDelete(e, route.id)} style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.6 }} />
+                                </div>
+                            )) : (
+                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#71717a', fontSize: '0.9rem' }}>
+                                    No routes found
                                 </div>
                             )}
                         </div>
-
-                        <select
-                            value={formData.status}
-                            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                        >
-                            <option value="PLANNED">Planned</option>
-                            <option value="ACTIVE">Active</option>
-                            <option value="COMPLETED">Completed</option>
-                        </select>
-
-                        <button type="submit" style={{ background: '#10b981', border: 'none', borderRadius: '8px', padding: '12px', color: 'white', cursor: 'pointer', fontWeight: 600 }}>
-                            Create Route
-                        </button>
-                    </form>
-                )}
-
-                {loading ? (
-                    <div style={{ textAlign: 'center', color: '#aaa', marginTop: '40px' }}>Loading routes...</div>
-                ) : routes.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#555', marginTop: '40px', background: 'rgba(255,255,255,0.05)', padding: '40px', borderRadius: '10px' }}>
-                        No routes found.
-                    </div>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {routes.map(route => (
-                            <div key={route.id} style={{
-                                background: 'rgba(30,30,40,0.8)',
-                                border: '1px solid #444',
-                                padding: '15px 20px',
-                                borderRadius: '12px',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                            }}>
-                                <div>
-                                    <div style={{ fontWeight: 600 }}>{route.name}</div>
-                                    <div style={{ color: '#aaa', fontSize: '0.85em' }}>
-                                        Status: <span style={{
-                                            color: route.status === 'ACTIVE' ? '#4ade80' : route.status === 'COMPLETED' ? '#60a5fa' : '#fbbf24'
-                                        }}>{route.status}</span>
-                                    </div>
-                                    <div style={{ color: '#666', fontSize: '0.8em', marginTop: '5px' }}>
-                                        {route.geofences?.length || 0} geofence(s)
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => handleDelete(route.id)}
-                                    style={{ background: '#ef4444', border: 'none', borderRadius: '8px', padding: '8px 12px', color: 'white', cursor: 'pointer' }}
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                    )}
+                </section>
             </div>
-        </div>
+
+            <div className="map-canvas">
+                <div className="map-toolbar">
+                    <div className="toolbar-btn" onClick={() => setCenterMapTrigger(Date.now())}><Navigation size={18} /></div>
+                    <div className="toolbar-btn"><Layers size={18} /></div>
+                </div>
+
+                <MapComponent
+                    geofenceCenter={geofenceCenter}
+                    geofenceRadius={100}
+                    onMapClick={setGeofenceCenter}
+                    centerMapTrigger={centerMapTrigger}
+                    allGeofences={geofences}
+                    highlightedGeofenceIds={selectedRouteId ? getRouteGeofences().map(g => g.id) : []}
+                />
+            </div>
+        </DashboardLayout>
     );
 };
 

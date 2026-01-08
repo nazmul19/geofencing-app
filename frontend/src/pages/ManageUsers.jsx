@@ -1,30 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { usersApi } from '../services/orgApi';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, UserPlus, Trash2, Edit } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { UserPlus, Trash2, Edit, User as UserIcon, Mail, Shield, CheckCircle, Calendar, Hash } from 'lucide-react';
+import DashboardLayout from '../components/DashboardLayout';
 
 const ManageUsers = () => {
-    const { user } = useAuth();
+    const { user: currentUser } = useAuth();
     const navigate = useNavigate();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
     const [formData, setFormData] = useState({ email: '', password: '', role: 'END_USER' });
 
     useEffect(() => {
-        if (!user?.organization?.id) {
+        if (!currentUser?.organization?.id) {
             navigate('/dashboard');
             return;
         }
         fetchUsers();
-    }, [user, navigate]);
+    }, [currentUser, navigate]);
 
     const fetchUsers = async () => {
         try {
             setLoading(true);
-            const res = await usersApi.getByOrganization(user.organization.id);
+            const res = await usersApi.getByOrganization(currentUser.organization.id);
             setUsers(res.data);
+            // Auto-select the first user if none selected
+            if (res.data.length > 0 && !selectedUser) {
+                setSelectedUser(res.data[0]);
+            }
         } catch (error) {
             console.error(error);
         } finally {
@@ -37,7 +44,7 @@ const ManageUsers = () => {
         try {
             await usersApi.create({
                 ...formData,
-                organizationId: user.organization.id
+                organizationId: currentUser.organization.id
             });
             setShowForm(false);
             setFormData({ email: '', password: '', role: 'END_USER' });
@@ -47,118 +54,149 @@ const ManageUsers = () => {
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to remove this user?')) return;
+    const handleDelete = async (e, id) => {
+        e.stopPropagation();
+        if (!confirm('Are you sure you want to delete this user?')) return;
         try {
             await usersApi.delete(id);
+            if (selectedUser?.id === id) setSelectedUser(null);
             fetchUsers();
         } catch (error) {
             alert('Failed to delete user');
         }
     };
 
+    const filteredUsers = users.filter(u =>
+        u.email.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
     return (
-        <div style={{ height: '100vh', width: '100vw', background: '#1e1e2f', color: '#fff', padding: '20px', overflowY: 'auto' }}>
-            <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-                <header style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
-                    <Link to="/dashboard" style={{ color: '#aaa' }}><ArrowLeft /></Link>
-                    <h1 style={{ margin: 0 }}>Manage Users</h1>
-                </header>
+        <DashboardLayout
+            title="Team Management"
+            searchQuery={searchQuery}
+            onSearchChange={(e) => setSearchQuery(e.target.value)}
+        >
+            <div className="side-panels" style={{ width: '400px' }}>
+                <section className="glass-panel" style={{ height: 'auto', maxHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <div className="panel-header" style={{ marginBottom: '16px' }}>
+                        <h3>{showForm ? 'New User' : 'Organization Team'}</h3>
+                        <div className="toolbar-btn" onClick={() => setShowForm(!showForm)}>
+                            <UserPlus size={18} />
+                        </div>
+                    </div>
 
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    style={{
-                        background: '#3b82f6',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '12px 20px',
-                        color: 'white',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        marginBottom: '20px',
-                        fontWeight: 600
-                    }}
-                >
-                    <UserPlus size={18} /> Add User
-                </button>
+                    {showForm ? (
+                        <form onSubmit={handleCreate} className="panel-list">
+                            <input
+                                type="email"
+                                placeholder="Email Address"
+                                value={formData.email}
+                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                required
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', width: '100%' }}
+                            />
+                            <input
+                                type="password"
+                                placeholder="Temporary Password"
+                                value={formData.password}
+                                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                required
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', width: '100%', marginTop: '8px' }}
+                            />
+                            <select
+                                value={formData.role}
+                                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                style={{ background: '#181926', border: '1px solid #333', color: '#fff', padding: '12px', borderRadius: '12px', width: '100%', marginTop: '8px' }}
+                            >
+                                <option value="END_USER">End User (Field Staff)</option>
+                                <option value="ORG_ADMIN">Org Admin (Manager)</option>
+                            </select>
+                            <button type="submit" className="action-button primary" style={{ marginTop: '16px' }}>Create Account</button>
+                            <button type="button" onClick={() => setShowForm(false)} className="action-button" style={{ marginTop: '8px' }}>Cancel</button>
+                        </form>
+                    ) : (
+                        <div className="panel-list" style={{ overflowY: 'auto' }}>
+                            {filteredUsers.length > 0 ? filteredUsers.map(u => (
+                                <div
+                                    key={u.id}
+                                    className={`list-item ${selectedUser?.id === u.id ? 'selected' : ''}`}
+                                    onClick={() => setSelectedUser(u)}
+                                    style={{ padding: '16px' }}
+                                >
+                                    <div className="item-content">
+                                        <div className="item-title" style={{ fontWeight: 600 }}>{u.email.split('@')[0]}</div>
+                                        <div className="item-subtitle">{u.role}</div>
+                                    </div>
+                                    {u.id !== currentUser.id && (
+                                        <Trash2 size={16} onClick={(e) => handleDelete(e, u.id)} style={{ color: '#ef4444', cursor: 'pointer', opacity: 0.6 }} />
+                                    )}
+                                </div>
+                            )) : (
+                                <div style={{ textAlign: 'center', padding: '40px 0', color: '#71717a', fontSize: '0.9rem' }}>
+                                    No users matching your search
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </section>
+            </div>
 
-                {showForm && (
-                    <form onSubmit={handleCreate} style={{
-                        background: 'rgba(30,30,40,0.8)',
-                        padding: '20px',
-                        borderRadius: '12px',
-                        marginBottom: '20px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '15px'
-                    }}>
-                        <input
-                            type="email"
-                            placeholder="Email"
-                            value={formData.email}
-                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                            required
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                        />
-                        <input
-                            type="password"
-                            placeholder="Password"
-                            value={formData.password}
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                            required
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                        />
-                        <select
-                            value={formData.role}
-                            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                            style={{ padding: '12px', borderRadius: '8px', border: '1px solid #444', background: '#2a2a3a', color: 'white' }}
-                        >
-                            <option value="END_USER">End User</option>
-                            <option value="ORG_ADMIN">Org Admin</option>
-                        </select>
-                        <button type="submit" style={{ background: '#10b981', border: 'none', borderRadius: '8px', padding: '12px', color: 'white', cursor: 'pointer', fontWeight: 600 }}>
-                            Create User
-                        </button>
-                    </form>
-                )}
+            <div className="map-canvas" style={{ flex: 1, padding: '24px', display: 'flex', justifyContent: 'center' }}>
+                {selectedUser ? (
+                    <div className="glass-panel" style={{ width: '100%', maxWidth: '600px', padding: '40px', display: 'flex', flexDirection: 'column', gap: '30px', alignSelf: 'flex-start' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                            <div style={{ width: '80px', height: '80px', borderRadius: '25px', background: 'linear-gradient(135deg, #818cf8, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <UserIcon size={40} color="white" />
+                            </div>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.8rem', fontWeight: 700 }}>{selectedUser.email.split('@')[0]}</h2>
+                                <p style={{ margin: '4px 0 0 0', color: '#818cf8', fontWeight: 600 }}>{selectedUser.role}</p>
+                            </div>
+                        </div>
 
-                {loading ? (
-                    <div style={{ textAlign: 'center', color: '#aaa', marginTop: '40px' }}>Loading users...</div>
-                ) : users.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#555', marginTop: '40px', background: 'rgba(255,255,255,0.05)', padding: '40px', borderRadius: '10px' }}>
-                        No users found.
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ color: '#71717a', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <Mail size={14} /> Email Address
+                                </div>
+                                <div style={{ fontSize: '1rem', fontWeight: 500 }}>{selectedUser.email}</div>
+                            </div>
+
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ color: '#71717a', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <Shield size={14} /> Access Level
+                                </div>
+                                <div style={{ fontSize: '1rem', fontWeight: 500 }}>{selectedUser.role === 'ORG_ADMIN' ? 'Administrator' : 'Field Operator'}</div>
+                            </div>
+
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ color: '#71717a', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <CheckCircle size={14} /> Status
+                                </div>
+                                <div style={{ fontSize: '1rem', fontWeight: 500, color: '#4ade80' }}>Active</div>
+                            </div>
+
+                            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ color: '#71717a', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <Hash size={14} /> User ID
+                                </div>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 500, color: '#71717a' }}>{selectedUser.id}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: 'auto', display: 'flex', gap: '12px' }}>
+                            <button className="action-button primary" style={{ flex: 1 }}>Reset Password</button>
+                            <button className="action-button" style={{ flex: 1 }}>Update Permissions</button>
+                        </div>
                     </div>
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {users.map(u => (
-                            <div key={u.id} style={{
-                                background: 'rgba(30,30,40,0.8)',
-                                border: '1px solid #444',
-                                padding: '15px 20px',
-                                borderRadius: '12px',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                            }}>
-                                <div>
-                                    <div style={{ fontWeight: 600 }}>{u.email}</div>
-                                    <div style={{ color: '#aaa', fontSize: '0.85em' }}>{u.role}</div>
-                                </div>
-                                <button
-                                    onClick={() => handleDelete(u.id)}
-                                    style={{ background: '#ef4444', border: 'none', borderRadius: '8px', padding: '8px 12px', color: 'white', cursor: 'pointer' }}
-                                    disabled={u.id === user.id}
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            </div>
-                        ))}
+                    <div style={{ textAlign: 'center', marginTop: '100px' }}>
+                        <UserIcon size={64} style={{ opacity: 0.1, marginBottom: '20px' }} />
+                        <p style={{ color: '#71717a' }}>Select a team member to view their profile</p>
                     </div>
                 )}
             </div>
-        </div>
+        </DashboardLayout>
     );
 };
 

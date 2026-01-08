@@ -1,15 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { routeAssignmentsApi } from '../services/orgApi';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, CheckCircle, AlertTriangle, Navigation } from 'lucide-react';
-
-const statusColors = {
-    PLANNED: { bg: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' },
-    COMPLETED: { bg: 'rgba(74, 222, 128, 0.2)', color: '#4ade80' },
-    MISSED: { bg: 'rgba(248, 113, 113, 0.2)', color: '#f87171' },
-    CANCELLED: { bg: 'rgba(156, 163, 175, 0.2)', color: '#9ca3af' }
-};
+import { useNavigate } from 'react-router-dom';
+import { MapPin, Clock, CheckCircle, AlertTriangle, Navigation, Plus, MoreHorizontal, Layers, Search } from 'lucide-react';
+import DashboardLayout from '../components/DashboardLayout';
+import MapComponent from '../components/MapComponent';
 
 const MyAssignments = () => {
     const { user } = useAuth();
@@ -18,6 +13,11 @@ const MyAssignments = () => {
     const [loading, setLoading] = useState(true);
     const [checkingIn, setCheckingIn] = useState(null);
     const [userLocation, setUserLocation] = useState(null);
+    const [geofenceCenter, setGeofenceCenter] = useState(null);
+    const [centerMapTrigger, setCenterMapTrigger] = useState(null);
+
+    // Search state
+    const [searchQuery, setSearchQuery] = useState('');
 
     useEffect(() => {
         if (!user?.id) {
@@ -26,7 +26,6 @@ const MyAssignments = () => {
         }
         fetchAssignments();
 
-        // Watch user location
         if (navigator.geolocation) {
             const watchId = navigator.geolocation.watchPosition(
                 (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -49,12 +48,16 @@ const MyAssignments = () => {
         }
     };
 
-    const handleCheckIn = async (assignmentId) => {
+    const handleCheckIn = (e, assignmentId) => {
+        e.stopPropagation(); // Don't trigger list item click
         if (!userLocation) {
-            alert('Unable to get your location. Please enable location services.');
+            alert('Location services required');
             return;
         }
+        confirmCheckIn(assignmentId);
+    };
 
+    const confirmCheckIn = async (assignmentId) => {
         try {
             setCheckingIn(assignmentId);
             await routeAssignmentsApi.checkIn(assignmentId, userLocation.lat, userLocation.lng);
@@ -69,170 +72,111 @@ const MyAssignments = () => {
 
     const formatDateTime = (dateStr) => {
         const date = new Date(dateStr);
-        return date.toLocaleString();
+        return date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
     };
 
     const isWithinWindow = (assignment) => {
         const now = new Date();
         const scheduled = new Date(assignment.scheduledTime);
         const bufferMs = assignment.bufferMinutes * 60 * 1000;
-        const windowStart = new Date(scheduled.getTime() - bufferMs);
-        const windowEnd = new Date(scheduled.getTime() + bufferMs);
-        return now >= windowStart && now <= windowEnd;
+        return now >= new Date(scheduled.getTime() - bufferMs) && now <= new Date(scheduled.getTime() + bufferMs);
     };
 
-    const plannedAssignments = assignments.filter(a => a.status === 'PLANNED');
-    const completedAssignments = assignments.filter(a => a.status === 'COMPLETED');
-    const otherAssignments = assignments.filter(a => ['MISSED', 'CANCELLED'].includes(a.status));
+    const handleVisitClick = (item) => {
+        if (item.geofence) {
+            setGeofenceCenter({ lat: item.geofence.latitude, lng: item.geofence.longitude });
+        }
+    };
+
+    const filteredAssignments = assignments.filter(a =>
+        a.geofence?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
-        <div style={{ height: '100vh', width: '100vw', background: '#1e1e2f', color: '#fff', padding: '20px', overflowY: 'auto' }}>
-            <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                <header style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '30px' }}>
-                    <Link to="/dashboard" style={{ color: '#aaa' }}><ArrowLeft /></Link>
-                    <h1 style={{ margin: 0 }}>My Site Visits</h1>
-                </header>
-
-                {userLocation && (
-                    <div style={{ background: 'rgba(59, 130, 246, 0.2)', padding: '10px 15px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9em', color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Navigation size={16} />
-                        Location active: {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}
+        <DashboardLayout
+            title="My Visits"
+            searchQuery={searchQuery}
+            onSearchChange={(e) => setSearchQuery(e.target.value)}
+        >
+            <div className="side-panels" style={{ width: '400px' }}>
+                <section className="glass-panel" style={{ height: 'auto', maxHeight: '50%', display: 'flex', flexDirection: 'column' }}>
+                    <div className="panel-header" style={{ marginBottom: '16px' }}>
+                        <h3>Upcoming Visits</h3>
                     </div>
-                )}
 
-                {loading ? (
-                    <div style={{ textAlign: 'center', color: '#aaa', marginTop: '40px' }}>Loading your assignments...</div>
-                ) : assignments.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: '#555', marginTop: '40px', background: 'rgba(255,255,255,0.05)', padding: '40px', borderRadius: '10px' }}>
-                        No site visits assigned to you.
+                    <div className="panel-list" style={{ overflowY: 'auto' }}>
+                        {filteredAssignments.filter(a => a.status === 'PLANNED').map(item => (
+                            <div
+                                key={item.id}
+                                className="list-item"
+                                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px', padding: '16px' }}
+                                onClick={() => handleVisitClick(item)}
+                            >
+                                <div className="item-title" style={{ fontWeight: 600 }}>{item.geofence?.name}</div>
+                                <div className="item-subtitle" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Clock size={12} /> {formatDateTime(item.scheduledTime)}
+                                </div>
+                                {isWithinWindow(item) ? (
+                                    <button
+                                        onClick={(e) => handleCheckIn(e, item.id)}
+                                        disabled={checkingIn === item.id}
+                                        className="action-button primary"
+                                        style={{ height: '36px', fontSize: '0.8rem', padding: '0 12px', width: 'auto', marginTop: '4px' }}
+                                    >
+                                        {checkingIn === item.id ? 'Verifying...' : 'Check In Now'}
+                                    </button>
+                                ) : (
+                                    <div style={{ fontSize: '0.75rem', color: '#fbbf24', background: 'rgba(251, 191, 36, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>
+                                        Check-in logic active within {item.bufferMinutes}m
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {filteredAssignments.filter(a => a.status === 'PLANNED').length === 0 && (
+                            <div style={{ textAlign: 'center', padding: '20px 0', color: '#71717a', fontSize: '0.8rem' }}>No upcoming visits</div>
+                        )}
                     </div>
-                ) : (
-                    <>
-                        {/* Pending Assignments */}
-                        {plannedAssignments.length > 0 && (
-                            <div style={{ marginBottom: '30px' }}>
-                                <h3 style={{ color: '#fbbf24', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <Clock size={18} /> Upcoming Visits ({plannedAssignments.length})
-                                </h3>
-                                {plannedAssignments.map(assignment => (
-                                    <div key={assignment.id} style={{
-                                        background: 'rgba(30,30,40,0.8)',
-                                        border: '1px solid #444',
-                                        padding: '18px',
-                                        borderRadius: '12px',
-                                        marginBottom: '12px'
-                                    }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                                            <MapPin size={18} style={{ color: '#f472b6' }} />
-                                            <span style={{ fontWeight: 600, fontSize: '1.1em' }}>{assignment.geofence?.name}</span>
-                                        </div>
+                </section>
 
-                                        <div style={{ color: '#aaa', fontSize: '0.9em', marginBottom: '15px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                <Clock size={14} />
-                                                {formatDateTime(assignment.scheduledTime)}
-                                            </div>
-                                            <div style={{ marginTop: '4px' }}>Buffer: ±{assignment.bufferMinutes} minutes</div>
-                                        </div>
-
-                                        {isWithinWindow(assignment) ? (
-                                            <button
-                                                onClick={() => handleCheckIn(assignment.id)}
-                                                disabled={checkingIn === assignment.id}
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '14px',
-                                                    borderRadius: '10px',
-                                                    border: 'none',
-                                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                                    color: 'white',
-                                                    cursor: 'pointer',
-                                                    fontWeight: 600,
-                                                    fontSize: '1em',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    gap: '8px'
-                                                }}
-                                            >
-                                                {checkingIn === assignment.id ? 'Checking in...' : (
-                                                    <><CheckCircle size={18} /> Check In Now</>
-                                                )}
-                                            </button>
-                                        ) : (
-                                            <div style={{
-                                                padding: '12px',
-                                                borderRadius: '8px',
-                                                background: 'rgba(251, 191, 36, 0.1)',
-                                                color: '#fbbf24',
-                                                textAlign: 'center',
-                                                fontSize: '0.9em'
-                                            }}>
-                                                Check-in available within the scheduled time window
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                <section className="glass-panel" style={{ height: 'auto', flex: 1, display: 'flex', flexDirection: 'column', marginTop: '20px' }}>
+                    <div className="panel-header" style={{ marginBottom: '16px' }}>
+                        <h3>Past Visits</h3>
+                    </div>
+                    <div className="panel-list" style={{ overflowY: 'auto' }}>
+                        {filteredAssignments.filter(a => a.status !== 'PLANNED').map(item => (
+                            <div
+                                key={item.id}
+                                className="list-item"
+                                onClick={() => handleVisitClick(item)}
+                                style={{ padding: '16px' }}
+                            >
+                                <div className="item-content">
+                                    <div className="item-title" style={{ fontWeight: 600 }}>{item.geofence?.name}</div>
+                                    <div className="item-subtitle">{item.status} at {formatDateTime(item.actualEntryTime || item.scheduledTime)}</div>
+                                </div>
+                                <CheckCircle size={18} style={{ color: item.status === 'COMPLETED' ? '#4ade80' : '#71717a', opacity: 0.8 }} />
                             </div>
-                        )}
-
-                        {/* Completed */}
-                        {completedAssignments.length > 0 && (
-                            <div style={{ marginBottom: '30px' }}>
-                                <h3 style={{ color: '#4ade80', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <CheckCircle size={18} /> Completed ({completedAssignments.length})
-                                </h3>
-                                {completedAssignments.map(assignment => (
-                                    <div key={assignment.id} style={{
-                                        background: 'rgba(74, 222, 128, 0.05)',
-                                        border: '1px solid rgba(74, 222, 128, 0.3)',
-                                        padding: '15px',
-                                        borderRadius: '12px',
-                                        marginBottom: '10px'
-                                    }}>
-                                        <div style={{ fontWeight: 600 }}>{assignment.geofence?.name}</div>
-                                        <div style={{ color: '#4ade80', fontSize: '0.85em', marginTop: '5px' }}>
-                                            ✓ Completed at {formatDateTime(assignment.actualEntryTime)}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Missed/Cancelled */}
-                        {otherAssignments.length > 0 && (
-                            <div>
-                                <h3 style={{ color: '#9ca3af', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <AlertTriangle size={18} /> Past Visits ({otherAssignments.length})
-                                </h3>
-                                {otherAssignments.map(assignment => (
-                                    <div key={assignment.id} style={{
-                                        background: 'rgba(156, 163, 175, 0.05)',
-                                        border: '1px solid rgba(156, 163, 175, 0.2)',
-                                        padding: '15px',
-                                        borderRadius: '12px',
-                                        marginBottom: '10px'
-                                    }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                            <span>{assignment.geofence?.name}</span>
-                                            <span style={{
-                                                fontSize: '0.8em',
-                                                padding: '2px 8px',
-                                                borderRadius: '4px',
-                                                background: statusColors[assignment.status]?.bg,
-                                                color: statusColors[assignment.status]?.color
-                                            }}>
-                                                {assignment.status}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </>
-                )}
+                        ))}
+                    </div>
+                </section>
             </div>
-        </div>
+
+            <div className="map-canvas">
+                <div className="map-toolbar">
+                    <div className="toolbar-btn" onClick={() => userLocation && setCenterMapTrigger(Date.now())}><Navigation size={18} /></div>
+                    <div className="toolbar-btn"><Layers size={18} /></div>
+                </div>
+
+                <MapComponent
+                    userLocation={userLocation}
+                    geofenceCenter={geofenceCenter}
+                    geofenceRadius={100}
+                    onMapClick={setGeofenceCenter}
+                    centerMapTrigger={centerMapTrigger}
+                    assignedSites={assignments}
+                />
+            </div>
+        </DashboardLayout>
     );
 };
 

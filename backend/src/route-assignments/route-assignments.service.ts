@@ -5,12 +5,15 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { CreateRouteAssignmentDto } from './dto/create-route-assignment.dto';
 import { UpdateRouteAssignmentDto } from './dto/update-route-assignment.dto';
 import { RouteAssignment, RouteAssignmentStatus } from './entities/route-assignment.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
 
 @Injectable()
 export class RouteAssignmentsService {
   constructor(
     @InjectRepository(RouteAssignment)
     private assignmentRepository: Repository<RouteAssignment>,
+    private notificationsService: NotificationsService,
   ) { }
 
   async create(createDto: CreateRouteAssignmentDto): Promise<RouteAssignment> {
@@ -80,7 +83,28 @@ export class RouteAssignmentsService {
       cancellationReason: reason
     });
 
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    if (!updated) return null;
+
+    // Notify assigned user
+    await this.notificationsService.create({
+      userId: updated.assignedToId,
+      title: 'Assignment Cancelled',
+      message: `Your visit to ${updated.geofence?.name} has been cancelled. Reason: ${reason || 'Not specified'}.`,
+      type: NotificationType.WARNING,
+    });
+
+    // Notify manager if someone else cancelled it
+    if (updated.reportsToId && updated.reportsToId !== cancelledById) {
+      await this.notificationsService.create({
+        userId: updated.reportsToId,
+        title: 'Assignment Cancelled',
+        message: `The visit to ${updated.geofence?.name} for ${updated.assignedTo?.email} was cancelled.`,
+        type: NotificationType.INFO,
+      });
+    }
+
+    return updated;
   }
 
   async checkIn(assignmentId: string, latitude: number, longitude: number) {
@@ -126,7 +150,20 @@ export class RouteAssignmentsService {
       statusChangedAt: now
     });
 
-    return this.findOne(assignmentId);
+    const updated = await this.findOne(assignmentId);
+    if (!updated) return null;
+
+    // Notify manager of successful check-in
+    if (updated.reportsToId) {
+      await this.notificationsService.create({
+        userId: updated.reportsToId,
+        title: 'Site Visit Completed',
+        message: `${updated.assignedTo?.email} successfully checked in at ${updated.geofence?.name}.`,
+        type: NotificationType.SUCCESS,
+      });
+    }
+
+    return updated;
   }
 
   // Haversine formula to calculate distance in meters
@@ -180,20 +217,25 @@ export class RouteAssignmentsService {
   }
 
   private async notifyManager(assignment: RouteAssignment) {
-    // In a real app, this would send email/push notification
-    // For now, we log it and could store in a notifications table
-    console.log(`NOTIFICATION: Route assignment missed!`);
-    console.log(`  - Assigned User: ${assignment.assignedTo?.email}`);
-    console.log(`  - Reports To: ${assignment.reportsTo?.email}`);
-    console.log(`  - Geofence: ${assignment.geofence?.name}`);
-    console.log(`  - Scheduled Time: ${assignment.scheduledTime}`);
-    console.log(`  - Reason: User did not check in within the time window`);
+    // Create in-app notification for the manager
+    if (assignment.reportsToId) {
+      await this.notificationsService.create({
+        userId: assignment.reportsToId,
+        title: 'Site Visit Missed',
+        message: `User ${assignment.assignedTo?.email} missed the scheduled visit to ${assignment.geofence?.name}.`,
+        type: NotificationType.DANGER,
+      });
+    }
 
-    // TODO: Implement actual notification (email, push, in-app)
-    // This could be: 
-    // - Email via nodemailer
-    // - Push notification via Firebase
-    // - In-app notification stored in a Notification entity
+    // Create in-app notification for the assigned user
+    if (assignment.assignedToId) {
+      await this.notificationsService.create({
+        userId: assignment.assignedToId,
+        title: 'You missed a visit',
+        message: `You missed your scheduled visit to ${assignment.geofence?.name}. Please contact your supervisor.`,
+        type: NotificationType.WARNING,
+      });
+    }
   }
 
   remove(id: string) {

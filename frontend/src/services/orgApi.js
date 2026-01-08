@@ -30,3 +30,10 @@ export const routeAssignmentsApi = {
     cancel: (id, cancelledById, reason) => api.post(`/route-assignments/${id}/cancel`, { cancelledById, reason }),
     delete: (id) => api.delete(`/route-assignments/${id}`),
 };
+
+export const notificationsApi = {
+    getByUser: (userId) => api.get(`/notifications?userId=${userId}`),
+    markAsRead: (id, userId) => api.patch(`/notifications/${id}/read?userId=${userId}`),
+    markAllAsRead: (userId) => api.patch(`/notifications/read-all?userId=${userId}`),
+    delete: (id, userId) => api.delete(`/notifications/${id}?userId=${userId}`),
+};
